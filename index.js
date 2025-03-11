@@ -153,7 +153,7 @@ app.post("/webhook", async (req, res) => {
       const userData = snapshot.val() || {};
       const lastFallbackTime = userData.lastFallbackTime || 0;
       const currentTime = Date.now();
-      const COOLDOWN_PERIOD = 300000;
+      const COOLDOWN_PERIOD = 43200000;
 
       if (currentTime - lastFallbackTime >= COOLDOWN_PERIOD) {
         await userRef.update({
@@ -164,10 +164,10 @@ app.post("/webhook", async (req, res) => {
 
         // ตรวจสอบเวลาทำการและส่งข้อความตามเงื่อนไข
         if (isWithinBusinessHours()) {
-          agent.add("รบกวนคุณลูกค้ารอเจ้าหน้าที่ฝ่ายบริการตอบกลับอีกครั้งนะคะ");
+          agent.add("รบกวนคุณลูกค้ารอเจ้าหน้าที่ฝ่ายบริการตอบกลับอีกครั้งนะคะ คุณลูกค้าสามารถพิมพ์คำถามไว้ได้เลยค่ะ");
         } else {
           agent.add(
-            "รบกวนคุณลูกค้ารอเจ้าหน้าที่ฝ่ายบริการตอบกลับอีกครั้งนะคะ ทั้งนี้เจ้าหน้าที่ฝ่ายบริการทำการจันทร์-เสาร์ เวลา 09.00-00.00 น. และวันอาทิตย์ทำการเวลา 09.00-18.00 น. ค่ะ"
+            "รบกวนคุณลูกค้ารอเจ้าหน้าที่ฝ่ายบริการตอบกลับอีกครั้งนะคะ ทั้งนี้เจ้าหน้าที่ฝ่ายบริการทำการจันทร์-เสาร์ เวลา 09.00-00.00 น. และวันอาทิตย์ทำการเวลา 09.00-18.00 น. ค่ะ คุณลูกค้าสามารถพิมพ์คำถามไว้ได้เลยนะคะ เจ้าหน้าที่จะทำการตอบกลับอีกครั้งในวเลาทำการค่ะ"
           );
         }
         console.log(`✅ Updated fallback time for user: ${userId}`);
