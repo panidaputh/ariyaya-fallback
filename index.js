@@ -14,7 +14,7 @@ const requiredEnvVars = [
 
 requiredEnvVars.forEach((varName) => {
   if (!process.env[varName]) {
-    console.error(`❌ Missing required environment variable: ${varName}`);
+    console.error(`❌ Missing required environment variable: ${varName} [STATUS: 500]`);
     process.exit(1);
   }
 });
@@ -34,7 +34,7 @@ const serviceAccount = {
 };
 
 // เริ่มการเชื่อมต่อ Firebase
-console.log("🔄 Attempting to connect to Firebase...");
+console.log("🔄 Attempting to connect to Firebase... [STATUS: PENDING]");
 console.log("📝 Firebase config:", {
   projectId: serviceAccount.project_id,
   clientEmail: serviceAccount.client_email,
@@ -54,7 +54,7 @@ try {
   // ทดสอบการเชื่อมต่อและการเขียนข้อมูล
   db.ref(".info/connected").on("value", async (snapshot) => {
     if (snapshot.val() === true) {
-      console.log("✅ Connected to Firebase Realtime Database");
+      console.log("✅ Connected to Firebase Realtime Database [STATUS: 200]");
 
       try {
         // ทดสอบเขียนข้อมูล
@@ -62,22 +62,22 @@ try {
           last_connection: new Date().toISOString(),
           status: "online",
         });
-        console.log("✅ Firebase write test successful");
+        console.log("✅ Firebase write test successful [STATUS: 200]");
       } catch (writeError) {
-        console.error("❌ Firebase write test failed:", writeError);
+        console.error(`❌ Firebase write test failed: ${writeError} [STATUS: 500]`);
       }
     } else {
-      console.log("❌ Disconnected from Firebase Realtime Database");
+      console.log("❌ Disconnected from Firebase Realtime Database [STATUS: 503]");
     }
   });
 
   // ทดสอบการอ่านข้อมูล
   db.ref("system_status")
     .once("value")
-    .then(() => console.log("✅ Firebase read test successful"))
-    .catch((error) => console.error("❌ Firebase read test failed:", error));
+    .then(() => console.log("✅ Firebase read test successful [STATUS: 200]"))
+    .catch((error) => console.error(`❌ Firebase read test failed: ${error} [STATUS: 500]`));
 } catch (initError) {
-  console.error("❌ Firebase initialization error:", initError);
+  console.error(`❌ Firebase initialization error: ${initError} [STATUS: 500]`);
   process.exit(1);
 }
 
@@ -118,10 +118,44 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Middleware สำหรับ logging HTTP requests
+app.use((req, res, next) => {
+  const start = Date.now();
+  const thaiTime = getThaiTime();
+  
+  // Original response methods
+  const originalSend = res.send;
+  const originalJson = res.json;
+  const originalStatus = res.status;
+  
+  // Override status method
+  res.status = function(code) {
+    res.statusCode = code;
+    return originalStatus.apply(res, arguments);
+  };
+  
+  // Override send method
+  res.send = function(body) {
+    const duration = Date.now() - start;
+    console.log(`🌐 ${req.method} ${req.originalUrl} [STATUS: ${res.statusCode}] - ${duration}ms`);
+    return originalSend.apply(res, arguments);
+  };
+  
+  // Override json method
+  res.json = function(body) {
+    const duration = Date.now() - start;
+    console.log(`🌐 ${req.method} ${req.originalUrl} [STATUS: ${res.statusCode}] - ${duration}ms`);
+    return originalJson.apply(res, arguments);
+  };
+  
+  console.log(`📥 Incoming request: ${req.method} ${req.originalUrl} [STATUS: PENDING]`);
+  next();
+});
+
 // Route สำหรับตรวจสอบสถานะเซิร์ฟเวอร์
 app.get("/", (req, res) => {
   const thaiTime = getThaiTime();
-  res.send({
+  res.status(200).send({
     status: "online",
     timestamp: thaiTime.toISOString(),
     thai_time: thaiTime.toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }),
@@ -136,7 +170,8 @@ app.post("/webhook", async (req, res) => {
   console.log("🔗 Received webhook request:", {
     timestamp: thaiTime.toISOString(),
     thai_time: thaiTime.toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }),
-    body: JSON.stringify(req.body, null, 2),
+    headers: req.headers,
+    body_size: JSON.stringify(req.body).length,
   });
 
   const agent = new WebhookClient({ request: req, response: res });
@@ -156,27 +191,35 @@ app.post("/webhook", async (req, res) => {
       const COOLDOWN_PERIOD = 18000000;
 
       if (currentTime - lastFallbackTime >= COOLDOWN_PERIOD) {
-        await userRef.update({
-          lastFallbackTime: currentTime,
-          lastUpdated: getThaiTime().toISOString(),
-          userId: userId,
-        });
-
-        // ตรวจสอบเวลาทำการและส่งข้อความตามเงื่อนไข
-        if (isWithinBusinessHours()) {
-          agent.add("รบกวนคุณลูกค้ารอเจ้าหน้าที่ฝ่ายบริการตอบกลับอีกครั้งนะคะ คุณลูกค้าสามารถพิมพ์คำถามไว้ได้เลยค่ะ");
-        } else {
-          agent.add(
-            "รบกวนคุณลูกค้ารอเจ้าหน้าที่ฝ่ายบริการตอบกลับอีกครั้งนะคะ ทั้งนี้เจ้าหน้าที่ฝ่ายบริการทำการจันทร์-เสาร์ เวลา 09.00-00.00 น. และวันอาทิตย์ทำการเวลา 09.00-18.00 น. ค่ะ คุณลูกค้าสามารถพิมพ์คำถามไว้ได้เลยนะคะ เจ้าหน้าที่จะทำการตอบกลับอีกครั้งในวเลาทำการค่ะ"
-          );
+        try {
+          await userRef.update({
+            lastFallbackTime: currentTime,
+            lastUpdated: getThaiTime().toISOString(),
+            userId: userId,
+          });
+          console.log(`✅ Updated fallback time for user: ${userId} [STATUS: 200]`);
+          
+          // ตรวจสอบเวลาทำการและส่งข้อความตามเงื่อนไข
+          const businessHours = isWithinBusinessHours();
+          console.log(`⏰ Business hours check: ${businessHours ? 'In hours' : 'After hours'} [STATUS: 200]`);
+          
+          if (businessHours) {
+            agent.add("รบกวนคุณลูกค้ารอเจ้าหน้าที่ฝ่ายบริการตอบกลับอีกครั้งนะคะ คุณลูกค้าสามารถพิมพ์คำถามไว้ได้เลยค่ะ");
+          } else {
+            agent.add(
+              "รบกวนคุณลูกค้ารอเจ้าหน้าที่ฝ่ายบริการตอบกลับอีกครั้งนะคะ ทั้งนี้เจ้าหน้าที่ฝ่ายบริการทำการจันทร์-เสาร์ เวลา 09.00-00.00 น. และวันอาทิตย์ทำการเวลา 09.00-18.00 น. ค่ะ คุณลูกค้าสามารถพิมพ์คำถามไว้ได้เลยนะคะ เจ้าหน้าที่จะทำการตอบกลับอีกครั้งในวเลาทำการค่ะ"
+            );
+          }
+        } catch (dbError) {
+          console.error(`❌ Database update error for user ${userId}: ${dbError} [STATUS: 500]`);
+          throw dbError;
         }
-        console.log(`✅ Updated fallback time for user: ${userId}`);
       } else {
         agent.add("");
-        console.log(`ℹ️ User ${userId} is in cooldown period`);
+        console.log(`ℹ️ User ${userId} is in cooldown period [STATUS: 200]`);
       }
     } catch (error) {
-      console.error("❌ Error in handleFallback:", error);
+      console.error(`❌ Error in handleFallback: ${error} [STATUS: 500]`);
       agent.add("ขออภัย เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง");
     }
   }
@@ -186,18 +229,19 @@ app.post("/webhook", async (req, res) => {
 
   try {
     await agent.handleRequest(intentMap);
+    console.log(`✅ Successfully processed webhook request [STATUS: 200]`);
   } catch (error) {
-    console.error("❌ Error handling webhook request:", error);
+    console.error(`❌ Error handling webhook request: ${error} [STATUS: 500]`);
     res.status(500).send({ error: "Internal server error" });
   }
 });
 
 // เริ่มต้น server
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
+const server = app.listen(port, () => {
   const thaiTime = getThaiTime();
   console.log(`
-🚀 Server is running
+🚀 Server is running [STATUS: 200]
 📋 Details:
 - Port: ${port}
 - Environment: ${process.env.NODE_ENV || "development"}
@@ -208,13 +252,18 @@ app.listen(port, () => {
   `);
 });
 
+// Monitor server events
+server.on('error', (error) => {
+  console.error(`💥 Server error: ${error} [STATUS: 500]`);
+});
+
 // จัดการ uncaught exceptions
 process.on("uncaughtException", (error) => {
-  console.error("💥 Uncaught Exception:", error);
+  console.error(`💥 Uncaught Exception: ${error} [STATUS: 500]`);
   process.exit(1);
 });
 
 process.on("unhandledRejection", (error) => {
-  console.error("💥 Unhandled Rejection:", error);
+  console.error(`💥 Unhandled Rejection: ${error} [STATUS: 500]`);
   process.exit(1);
 });
